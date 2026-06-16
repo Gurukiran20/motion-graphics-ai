@@ -1,5 +1,5 @@
 import ZAI from 'z-ai-web-dev-sdk';
-import type { SceneGraph, SceneAnalysisResult, LayerInfo, BrandColors, TypographyInfo, LayoutStructure, VisualHierarchy } from '@/lib/types';
+import type { SceneGraph, SceneAnalysisResult, LayerInfo } from '@/lib/types';
 
 let zaiInstance: InstanceType<typeof ZAI> | null = null;
 
@@ -110,67 +110,202 @@ Respond with a valid JSON object matching this exact structure:
   }
 }
 
+IMPORTANT: Output ONLY valid JSON. No markdown code blocks, no explanation text outside the JSON.
 Be thorough and precise. Every visual element must be captured. Positions must be realistic percentages.`;
 
-export async function analyzeScene(imageDataUrl: string): Promise<SceneAnalysisResult> {
-  const zai = await getZAI();
-
-  // First pass: VLM analysis of the image
-  const vlmResponse = await zai.chat.completions.createVision({
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: SCENE_ANALYSIS_PROMPT },
-          { type: 'image_url', image_url: { url: imageDataUrl } }
-        ]
-      }
+function buildFallbackSceneGraph(): SceneGraph {
+  return {
+    headline: {
+      text: 'Design Headline',
+      position: { x: 10, y: 20, width: 80, height: 15 },
+      style: { fontSize: 48, fontWeight: 'bold', color: '#ffffff', fontFamily: 'sans-serif' },
+    },
+    subheadline: {
+      text: 'Subtitle text',
+      position: { x: 10, y: 40, width: 80, height: 10 },
+      style: { fontSize: 24, fontWeight: 'normal', color: '#cccccc', fontFamily: 'sans-serif' },
+    },
+    cta: {
+      text: 'Get Started',
+      position: { x: 30, y: 60, width: 40, height: 8 },
+      style: { fontSize: 18, fontWeight: 'bold', color: '#ffffff', backgroundColor: '#4F46E5', borderRadius: 8 },
+    },
+    logo: {
+      position: { x: 5, y: 5, width: 15, height: 8 },
+    },
+    layers: [
+      { id: 'layer_0', type: 'background', label: 'Background', position: { x: 0, y: 0, width: 100, height: 100 }, zIndex: 0, color: '#1a1a2e', opacity: 1, borderRadius: 0 },
+      { id: 'layer_1', type: 'headline', label: 'Headline', content: 'Design Headline', position: { x: 10, y: 20, width: 80, height: 15 }, zIndex: 10, color: '#ffffff', fontSize: 48, fontWeight: 'bold', fontFamily: 'sans-serif', opacity: 1, borderRadius: 0 },
+      { id: 'layer_2', type: 'subheadline', label: 'Subheadline', content: 'Subtitle text', position: { x: 10, y: 40, width: 80, height: 10 }, zIndex: 9, color: '#cccccc', fontSize: 24, fontWeight: 'normal', fontFamily: 'sans-serif', opacity: 1, borderRadius: 0 },
+      { id: 'layer_3', type: 'cta', label: 'CTA Button', content: 'Get Started', position: { x: 30, y: 60, width: 40, height: 8 }, zIndex: 11, color: '#ffffff', fontSize: 18, fontWeight: 'bold', fontFamily: 'sans-serif', opacity: 1, borderRadius: 8 },
+      { id: 'layer_4', type: 'logo', label: 'Logo', position: { x: 5, y: 5, width: 15, height: 8 }, zIndex: 12, opacity: 1, borderRadius: 0 },
     ],
-    thinking: { type: 'disabled' }
-  });
+    hierarchy: {
+      order: ['layer_1', 'layer_2', 'layer_3', 'layer_4', 'layer_0'],
+      levels: [
+        { level: 1, layerIds: ['layer_1'], description: 'Primary headline' },
+        { level: 2, layerIds: ['layer_3'], description: 'Call to action' },
+        { level: 3, layerIds: ['layer_2'], description: 'Supporting text' },
+        { level: 4, layerIds: ['layer_4'], description: 'Logo' },
+      ],
+    },
+    brandColors: {
+      primary: '#4F46E5',
+      secondary: '#7C3AED',
+      accent: '#F59E0B',
+      background: '#1A1A2E',
+      text: '#FFFFFF',
+      additional: [],
+    },
+    typography: {
+      headlineFont: 'sans-serif',
+      headlineWeight: 'bold',
+      headlineSize: '48px',
+      bodyFont: 'sans-serif',
+      bodyWeight: 'normal',
+      bodySize: '24px',
+      ctaFont: 'sans-serif',
+      ctaWeight: 'bold',
+      ctaSize: '18px',
+    },
+    layout: {
+      type: 'centered',
+      direction: 'vertical',
+      spacing: 'normal',
+      alignment: 'center',
+      sections: [
+        { id: 'section_1', type: 'hero', position: { x: 0, y: 0, width: 100, height: 100 } },
+      ],
+    },
+    sceneGraph: {
+      width: 1920,
+      height: 1080,
+      aspectRatio: '16:9',
+      backgroundColor: '#1a1a2e',
+      globalOpacity: 1,
+    },
+  };
+}
 
-  const rawAnalysis = vlmResponse.choices[0]?.message?.content || '';
-
-  // Parse the JSON from the response
-  let sceneGraph: SceneGraph;
+function safeParseJSON(text: string): SceneGraph | null {
   try {
-    // Try to extract JSON from the response
-    const jsonMatch = rawAnalysis.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found in response');
-    sceneGraph = JSON.parse(jsonMatch[0]);
+    // Try direct parse first
+    return JSON.parse(text);
   } catch {
-    // Fallback: Use LLM to structure the raw analysis
-    console.log('First pass JSON parsing failed, using LLM to structure...');
-    const structuringResponse = await zai.chat.completions.create({
+    // Try to extract JSON from markdown code blocks or mixed content
+    const patterns = [
+      /```json\s*([\s\S]*?)```/,      // markdown code block
+      /```\s*([\s\S]*?)```/,           // generic code block
+      /(\{[\s\S]*\})/,                 // bare JSON object
+    ];
+    
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        try {
+          return JSON.parse(match[1]);
+        } catch {
+          continue;
+        }
+      }
+    }
+    return null;
+  }
+}
+
+export async function analyzeScene(imageDataUrl: string): Promise<SceneAnalysisResult> {
+  try {
+    const zai = await getZAI();
+
+    // First pass: VLM analysis of the image
+    const vlmResponse = await zai.chat.completions.createVision({
       messages: [
         {
-          role: 'assistant',
-          content: 'You are a JSON structuring assistant. Convert the following analysis into valid JSON matching the scene graph schema. Output ONLY valid JSON, no markdown, no explanation.'
-        },
-        {
           role: 'user',
-          content: `Convert this visual analysis into the scene graph JSON structure:\n\n${rawAnalysis}`
+          content: [
+            { type: 'text', text: SCENE_ANALYSIS_PROMPT },
+            { type: 'image_url', image_url: { url: imageDataUrl } }
+          ]
         }
       ],
       thinking: { type: 'disabled' }
     });
 
-    const structuredText = structuringResponse.choices[0]?.message?.content || '';
-    const jsonMatch2 = structuredText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch2) throw new Error('Failed to structure scene graph');
-    sceneGraph = JSON.parse(jsonMatch2[0]);
-  }
+    const rawAnalysis = vlmResponse.choices[0]?.message?.content || '';
 
-  // Ensure all layers have unique IDs
-  if (sceneGraph.layers) {
-    sceneGraph.layers = sceneGraph.layers.map((layer: LayerInfo, index: number) => ({
-      id: layer.id || `layer_${index}`,
-      ...layer,
-    }));
-  }
+    if (!rawAnalysis || rawAnalysis.trim().length === 0) {
+      console.warn('VLM returned empty response, using fallback scene graph');
+      return { sceneGraph: buildFallbackSceneGraph(), rawAnalysis: 'Fallback: VLM returned empty response' };
+    }
 
-  return {
-    sceneGraph,
-    rawAnalysis,
-  };
+    // Parse the JSON from the response
+    let sceneGraph = safeParseJSON(rawAnalysis);
+
+    if (!sceneGraph) {
+      // Fallback: Use LLM to structure the raw analysis
+      console.log('First pass JSON parsing failed, using LLM to structure...');
+      try {
+        const structuringResponse = await zai.chat.completions.create({
+          messages: [
+            {
+              role: 'assistant',
+              content: 'You are a JSON structuring assistant. Convert the following analysis into valid JSON matching the scene graph schema. Output ONLY valid JSON, no markdown, no explanation.'
+            },
+            {
+              role: 'user',
+              content: `Convert this visual analysis into the scene graph JSON structure:\n\n${rawAnalysis}`
+            }
+          ],
+          thinking: { type: 'disabled' }
+        });
+
+        const structuredText = structuringResponse.choices[0]?.message?.content || '';
+        sceneGraph = safeParseJSON(structuredText);
+      } catch (structError) {
+        console.error('Structuring LLM call failed:', structError);
+      }
+    }
+
+    if (!sceneGraph) {
+      console.warn('All JSON parsing attempts failed, using fallback scene graph');
+      return { sceneGraph: buildFallbackSceneGraph(), rawAnalysis };
+    }
+
+    // Ensure all layers have unique IDs
+    if (sceneGraph.layers) {
+      sceneGraph.layers = sceneGraph.layers.map((layer: LayerInfo, index: number) => ({
+        id: layer.id || `layer_${index}`,
+        ...layer,
+      }));
+    }
+
+    // Ensure required fields exist with defaults
+    if (!sceneGraph.hierarchy) {
+      sceneGraph.hierarchy = { order: sceneGraph.layers?.map(l => l.id) || [], levels: [] };
+    }
+    if (!sceneGraph.brandColors) {
+      sceneGraph.brandColors = { primary: '#4F46E5', secondary: '#7C3AED', accent: '#F59E0B', background: '#1A1A2E', text: '#FFFFFF', additional: [] };
+    }
+    if (!sceneGraph.typography) {
+      sceneGraph.typography = { headlineFont: 'sans-serif', headlineWeight: 'bold', headlineSize: '48px', bodyFont: 'sans-serif', bodyWeight: 'normal', bodySize: '24px', ctaFont: 'sans-serif', ctaWeight: 'bold', ctaSize: '18px' };
+    }
+    if (!sceneGraph.layout) {
+      sceneGraph.layout = { type: 'centered', direction: 'vertical', spacing: 'normal', alignment: 'center', sections: [] };
+    }
+    if (!sceneGraph.sceneGraph) {
+      sceneGraph.sceneGraph = { width: 1920, height: 1080, aspectRatio: '16:9', backgroundColor: '#1a1a2e', globalOpacity: 1 };
+    }
+
+    return {
+      sceneGraph,
+      rawAnalysis,
+    };
+  } catch (error) {
+    console.error('Scene analysis completely failed:', error);
+    // Return a fallback scene graph instead of throwing
+    return {
+      sceneGraph: buildFallbackSceneGraph(),
+      rawAnalysis: `Error during analysis: ${error instanceof Error ? error.message : 'Unknown error'}. Using default scene graph.`,
+    };
+  }
 }

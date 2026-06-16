@@ -5,9 +5,10 @@ import fs from 'fs';
 import path from 'path';
 
 export async function POST(request: NextRequest) {
+  let projectId: string | undefined;
   try {
     const body = await request.json();
-    const { projectId } = body;
+    projectId = body.projectId;
 
     if (!projectId) {
       return NextResponse.json(
@@ -36,6 +37,15 @@ export async function POST(request: NextRequest) {
 
     // Read the image file and convert to base64 data URL
     const imagePath = path.join(process.cwd(), 'public', project.imageUrl);
+    
+    if (!fs.existsSync(imagePath)) {
+      await db.project.update({ where: { id: projectId }, data: { status: 'uploaded' } });
+      return NextResponse.json(
+        { error: 'Image file not found on server. Please re-upload.' },
+        { status: 400 }
+      );
+    }
+
     const imageBuffer = fs.readFileSync(imagePath);
     const base64Image = imageBuffer.toString('base64');
 
@@ -88,20 +98,22 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Analyze error:', error);
-
-    // Try to update status back on failure
-    try {
-      const body = await new Request(request).json().catch(() => ({}));
-      if (body.projectId) {
+    
+    // Try to update status back on failure - use the projectId we already extracted
+    if (projectId) {
+      try {
         await db.project.update({
-          where: { id: body.projectId },
+          where: { id: projectId },
           data: { status: 'uploaded' },
         });
+      } catch (dbError) {
+        console.error('Failed to reset project status:', dbError);
       }
-    } catch {}
+    }
 
+    const errorMessage = error instanceof Error ? error.message : 'Failed to analyze scene';
     return NextResponse.json(
-      { error: 'Failed to analyze scene' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

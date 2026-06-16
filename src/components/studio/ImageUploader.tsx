@@ -5,6 +5,7 @@ import { Upload, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useProjectStore } from '@/lib/store';
+import { safeParseJSON } from '@/lib/safe-fetch';
 
 export function ImageUploader() {
   const { setImageUrl, setProjectId, setImageName, setPipelineState, pipelineState, isProcessing, setIsProcessing, setError } = useProjectStore();
@@ -35,12 +36,11 @@ export function ImageUploader() {
         body: formData,
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
-      }
+      const data = await safeParseJSON<{ projectId?: string; imageUrl?: string; name?: string; error?: string }>(response);
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Upload failed');
+      }
       setProjectId(data.projectId);
       setImageUrl(data.imageUrl);
       setImageName(file.name);

@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useProjectStore } from '@/lib/store';
+import { safeParseJSON } from '@/lib/safe-fetch';
 import { ImageUploader } from '@/components/studio/ImageUploader';
 import { SceneGraphViewer } from '@/components/studio/SceneGraphViewer';
 import { MotionPlanViewer } from '@/components/studio/MotionPlanViewer';
@@ -63,15 +64,15 @@ export default function Home() {
         body: JSON.stringify({ projectId }),
       });
 
+      const data = await safeParseJSON(response);
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Analysis failed');
+        throw new Error((data as { error?: string }).error || 'Analysis failed');
       }
 
-      const data = await response.json();
-      const sg = data.sceneAnalysis?.sceneGraph || data.sceneGraph;
-      setSceneGraph(sg);
-      setRawAnalysis(data.sceneAnalysis?.rawAnalysis || data.rawAnalysis);
+      const sg = (data as { sceneAnalysis?: { sceneGraph?: unknown }; sceneGraph?: unknown }).sceneAnalysis?.sceneGraph || (data as { sceneGraph?: unknown }).sceneGraph;
+      setSceneGraph(sg as Parameters<typeof setSceneGraph>[0]);
+      setRawAnalysis((data as { sceneAnalysis?: { rawAnalysis?: string }; rawAnalysis?: string }).sceneAnalysis?.rawAnalysis || (data as { rawAnalysis?: string }).rawAnalysis || null);
       setPipelineState({
         currentStage: 'planning',
         stageStatus: { ...pipelineState.stageStatus, analyzing: 'completed', planning: 'in_progress' },
@@ -79,7 +80,7 @@ export default function Home() {
       });
 
       // Auto-advance to motion planning
-      await handlePlanMotion(sg);
+      await handlePlanMotion(sg as Parameters<typeof setSceneGraph>[0]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed');
       setPipelineState({ stageStatus: { ...pipelineState.stageStatus, analyzing: 'failed' } });
@@ -103,14 +104,14 @@ export default function Home() {
         body: JSON.stringify({ projectId }),
       });
 
+      const data = await safeParseJSON(response);
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Motion planning failed');
+        throw new Error((data as { error?: string }).error || 'Motion planning failed');
       }
 
-      const data = await response.json();
-      const variants = data.variants?.map((v: { id: string; variantType: string; motionPlan: unknown }) => v.motionPlan || v) || [];
-      setMotionVariants(variants);
+      const variants = (data as { variants?: Array<{ id: string; variantType: string; motionPlan: unknown }> }).variants?.map((v) => v.motionPlan || v) || [];
+      setMotionVariants(variants as Parameters<typeof setMotionVariants>[0]);
       setPipelineState({
         currentStage: 'rendering',
         stageStatus: { ...pipelineState.stageStatus, planning: 'completed', rendering: 'in_progress' },
@@ -138,13 +139,14 @@ export default function Home() {
         body: JSON.stringify({ projectId, variantType }),
       });
 
+      const data = await safeParseJSON(response);
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Rendering failed');
+        throw new Error((data as { error?: string }).error || 'Rendering failed');
       }
 
-      const data = await response.json();
-      setRenderConfig(data.renderConfig || data.renderJob?.renderConfig);
+      const rc = (data as { renderConfig?: unknown; renderJob?: { renderConfig?: unknown } }).renderConfig || (data as { renderJob?: { renderConfig?: unknown } }).renderJob?.renderConfig;
+      setRenderConfig(rc as Parameters<typeof setRenderConfig>[0]);
       setPipelineState({
         currentStage: 'evaluating',
         stageStatus: { ...pipelineState.stageStatus, rendering: 'completed', evaluating: 'in_progress' },
@@ -174,13 +176,13 @@ export default function Home() {
         body: JSON.stringify({ projectId, variantType: selectedVariant }),
       });
 
+      const data = await safeParseJSON(response);
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Evaluation failed');
+        throw new Error((data as { error?: string }).error || 'Evaluation failed');
       }
 
-      const data = await response.json();
-      setEvaluation(data.evaluation);
+      setEvaluation((data as { evaluation: unknown }).evaluation as Parameters<typeof setEvaluation>[0]);
       setPipelineState({
         currentStage: 'feedback',
         stageStatus: { ...pipelineState.stageStatus, evaluating: 'completed', feedback: 'in_progress' },
@@ -207,16 +209,17 @@ export default function Home() {
         body: JSON.stringify({ projectId, feedback, variantType: selectedVariant }),
       });
 
+      const data = await safeParseJSON(response);
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Feedback processing failed');
+        throw new Error((data as { error?: string }).error || 'Feedback processing failed');
       }
 
-      const data = await response.json();
-      if (data.updatedSceneGraph) setSceneGraph(data.updatedSceneGraph);
-      if (data.updatedMotionVariant) {
+      const typedData = data as { updatedSceneGraph?: unknown; updatedMotionVariant?: { variantType?: string } };
+      if (typedData.updatedSceneGraph) setSceneGraph(typedData.updatedSceneGraph as Parameters<typeof setSceneGraph>[0]);
+      if (typedData.updatedMotionVariant) {
         setMotionVariants(prev => 
-          prev.map(v => v.variantType === data.updatedMotionVariant.variantType ? data.updatedMotionVariant : v)
+          prev.map(v => v.variantType === typedData.updatedMotionVariant?.variantType ? typedData.updatedMotionVariant as typeof v : v)
         );
       }
     } catch (err) {
@@ -243,16 +246,17 @@ export default function Home() {
         body: formData,
       });
 
+      const data = await safeParseJSON(response);
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Voice editing failed');
+        throw new Error((data as { error?: string }).error || 'Voice editing failed');
       }
 
-      const data = await response.json();
-      if (data.updatedSceneGraph) setSceneGraph(data.updatedSceneGraph);
-      if (data.updatedMotionVariant) {
+      const typedData = data as { updatedSceneGraph?: unknown; updatedMotionVariant?: { variantType?: string } };
+      if (typedData.updatedSceneGraph) setSceneGraph(typedData.updatedSceneGraph as Parameters<typeof setSceneGraph>[0]);
+      if (typedData.updatedMotionVariant) {
         setMotionVariants(prev => 
-          prev.map(v => v.variantType === data.updatedMotionVariant.variantType ? data.updatedMotionVariant : v)
+          prev.map(v => v.variantType === typedData.updatedMotionVariant?.variantType ? typedData.updatedMotionVariant as typeof v : v)
         );
       }
     } catch (err) {
@@ -276,13 +280,13 @@ export default function Home() {
         body: JSON.stringify({ projectId, variantType: selectedVariant }),
       });
 
+      const data = await safeParseJSON(response);
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Quality gate failed');
+        throw new Error((data as { error?: string }).error || 'Quality gate failed');
       }
 
-      const data = await response.json();
-      setQualityReport(data.report);
+      setQualityReport((data as { report: unknown }).report as Parameters<typeof setQualityReport>[0]);
       setPipelineState({
         currentStage: 'complete',
         stageStatus: { ...pipelineState.stageStatus, quality_gate: 'completed', complete: 'completed' },
