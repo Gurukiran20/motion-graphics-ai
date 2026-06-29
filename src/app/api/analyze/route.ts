@@ -119,12 +119,10 @@
 //   }
 // }
 
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { analyzeScene } from '@/lib/agents/scene-understanding';
-import { ratelimit } from '@/lib/ratelimit';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { analyzeScene } from "@/lib/agents/scene-understanding";
+import { ratelimit } from "@/lib/ratelimit";
 
 export async function POST(request: NextRequest) {
   let projectId: string | undefined;
@@ -154,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     if (!projectId) {
       return NextResponse.json(
-        { error: 'projectId is required' },
+        { error: "projectId is required" },
         { status: 400 }
       );
     }
@@ -166,7 +164,7 @@ export async function POST(request: NextRequest) {
 
     if (!project) {
       return NextResponse.json(
-        { error: 'Project not found' },
+        { error: "Project not found" },
         { status: 404 }
       );
     }
@@ -174,43 +172,41 @@ export async function POST(request: NextRequest) {
     // Update status to analyzing
     await db.project.update({
       where: { id: projectId },
-      data: { status: 'analyzing' },
+      data: { status: "analyzing" },
     });
 
-    // Read the image file
-    const imagePath = path.join(process.cwd(), 'public', project.imageUrl);
+    // ==========================
+    // Download image from Vercel Blob
+    // ==========================
+    const response = await fetch(project.imageUrl);
 
-    if (!fs.existsSync(imagePath)) {
+    if (!response.ok) {
       await db.project.update({
         where: { id: projectId },
-        data: { status: 'uploaded' },
+        data: { status: "uploaded" },
       });
 
       return NextResponse.json(
-        { error: 'Image file not found on server. Please re-upload.' },
+        {
+          error: "Failed to download uploaded image.",
+        },
         { status: 400 }
       );
     }
 
-    const imageBuffer = fs.readFileSync(imagePath);
-    const base64Image = imageBuffer.toString('base64');
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    const ext = path.extname(project.imageUrl).toLowerCase();
+    const mimeType =
+      response.headers.get("content-type") || "image/png";
 
-    const mimeMap: Record<string, string> = {
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
-      '.svg': 'image/svg+xml',
-    };
-
-    const mimeType = mimeMap[ext] || 'image/png';
+    const base64Image = buffer.toString("base64");
 
     const imageDataUrl = `data:${mimeType};base64,${base64Image}`;
 
+    // ==========================
     // AI Scene Analysis
+    // ==========================
     const analysisResult = await analyzeScene(imageDataUrl);
 
     // Save analysis
@@ -236,7 +232,7 @@ export async function POST(request: NextRequest) {
     // Update project status
     await db.project.update({
       where: { id: projectId },
-      data: { status: 'analyzed' },
+      data: { status: "analyzed" },
     });
 
     return NextResponse.json({
@@ -247,21 +243,23 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Analyze error:', error);
+    console.error("Analyze error:", error);
 
     if (projectId) {
       try {
         await db.project.update({
           where: { id: projectId },
-          data: { status: 'uploaded' },
+          data: { status: "uploaded" },
         });
       } catch (dbError) {
-        console.error('Failed to reset project status:', dbError);
+        console.error("Failed to reset project status:", dbError);
       }
     }
 
     const errorMessage =
-      error instanceof Error ? error.message : 'Failed to analyze scene';
+      error instanceof Error
+        ? error.message
+        : "Failed to analyze scene";
 
     return NextResponse.json(
       {
