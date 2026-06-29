@@ -591,7 +591,7 @@ export default function Home() {
                           <Button
                             className="w-full gap-2"
                             onClick={handleQualityGate}
-                            disabled={isProcessing}
+                            disabled={false}
                           >
                             {isProcessing ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
